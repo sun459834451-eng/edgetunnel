@@ -1,0 +1,34 @@
+version: '3.8'
+
+# ========================================================
+# 一体化自动 SSL 方案（包含 edgetunnel 与 Caddy 自动申请证书）
+# 使用方法：
+#   1. 在 .env 中填好 DOMAIN、EMAIL 和 ADMIN 密码
+#   2. 运行：docker compose -f docker-compose.caddy.yml up -d
+# ========================================================
+
+services:
+  edgetunnel:
+    build: .
+    container_name: edgetunnel-app
+    restart: unless-stopped
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+
+  caddy:
+    image: caddy:alpine
+    container_name: edgetunnel-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    depends_on:
+      - edgetunnel

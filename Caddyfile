@@ -1,0 +1,12 @@
+{$HOST} {
+    # 启用自动 TLS 证书申请
+    tls {$ACME_EMAIL:internal}
+
+    # 反向代理流量到 edgetunnel 容器（支持 WebSocket / HTTP 流式传输）
+    reverse_proxy edgetunnel:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

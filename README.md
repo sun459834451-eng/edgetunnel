@@ -112,6 +112,59 @@
 
 </details>
 
+### 🖥️ 服务器独立部署 (Docker / Linux VPS) **功能完全一致**
+
+<details open>
+<summary><code><strong>「 服务器 Docker / Node.js 部署教程 」</strong></code></summary>
+
+针对不使用 Cloudflare 平台、希望在自己的 VPS / 独立服务器上运行的用户，本项目内置了服务端原生适配层（[`server.mjs`](./server.mjs)），**100% 保持所有原有特性（可视化管理后台、全客户端订阅转换、多协议解密隧道、KV 磁盘持久化等）完全不变**。
+
+#### 1. 基础 Docker Compose 部署 (最快上手)
+在服务器上克隆仓库并复制环境变量文件：
+```bash
+git clone https://github.com/sun459834451-eng/edgetunnel.git
+cd edgetunnel
+cp .env.example .env
+```
+编辑 `.env` 文件，填入您的密码与密钥：
+```bash
+nano .env # 或使用 vi / vim
+```
+启动容器：
+```bash
+docker compose up -d --build
+```
+- **访问后台**：`http://服务器IP:8080/admin`（输入配置的 ADMIN 密码）
+- **快速导入订阅**：`http://服务器IP:8080/<KEY>`（自动适配客户端并重定向）
+
+#### 2. 自动化 SSL 证书部署 (Docker + Caddy 一体化)
+如需配置域名并自动开启 80/443 端口的 Let's Encrypt SSL 证书：
+1. 确保域名（如 `vps.yourdomain.com`）已 A 记录解析到服务器 IP；
+2. 编辑 `.env`，设置：
+   ```env
+   HOST=vps.yourdomain.com
+   ADMIN=YourPasswordHere
+   KEY=my_secret_token
+   ```
+3. 一键启动包含 Caddy 证书反代的集群：
+   ```bash
+   docker compose -f docker-compose.caddy.yml up -d --build
+   ```
+- **安全后台**：`https://vps.yourdomain.com/admin`
+- **安全订阅**：`https://vps.yourdomain.com/<KEY>`
+
+#### 3. 原生 Node.js 运行 (无需 Docker)
+服务器需安装 Node.js (>= 18)：
+```bash
+npm install
+export ADMIN="YourPasswordHere"
+export KEY="my_secret_token"
+export PORT=8080
+node server.mjs
+```
+
+</details>
+
 ---
 
 ## 🔑 环境变量说明
