@@ -32,3 +32,4 @@ services:
       - ./caddy_config:/config
     depends_on:
       - edgetunnel
+

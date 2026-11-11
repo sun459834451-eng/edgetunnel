@@ -8,11 +8,11 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     environment:
-      - ADMIN=${ADMIN:-admin888888}         # ⚠️ 必填：管理员密码
-      - UUID=${UUID:-}                     # 可选：不填由 ADMIN+KEY 自动派生
-      - KEY=${KEY:-my_secret_sub_key}      # 可选：快速订阅密钥
-      - HOST=${HOST:-}                     # 可选：绑定的服务器域名
-      - PROXYIP=${PROXYIP:-}               # 可选：回源反代 IP
+      - ADMIN=${ADMIN:-admin888888} # ⚠️ 必填：管理员密码
+      - UUID=${UUID:-} # 可选：不填由 ADMIN+KEY 自动派生
+      - KEY=${KEY:-my_secret_sub_key} # 可选：快速订阅密钥
+      - HOST=${HOST:-} # 可选：绑定的服务器域名
+      - PROXYIP=${PROXYIP:-} # 可选：回源反代 IP
       - PORT=8080
     volumes:
-      - ./data:/app/data                   # KV 持久化目录（存储 config.json、ADD.txt 等）
+      - ./data:/app/data # KV 持久化目录（存储 config.json、ADD.txt 等）
