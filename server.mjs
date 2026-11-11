@@ -214,7 +214,7 @@ function createDiskKV(dataDir) {
 // ==========================================
 // 6. No-TLS & Plain IP Subscription Transformer
 // ==========================================
-function transformSubToNoTls(text, port) {
+function transformSubToNoTls(text, host, port) {
     const trimmed = text.trim();
     const isBase64 = /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed) && !trimmed.includes('vless://') && !trimmed.includes('proxies:');
     let raw = trimmed;
@@ -229,20 +229,25 @@ function transformSubToNoTls(text, port) {
     if (raw.includes('vless://') || raw.includes('trojan://') || raw.includes('ss://')) {
         raw = raw
             .replace(/security=tls/g, 'security=none')
-            .replace(/:(?:443|2053|2083|2087|2096|8443)(\?|#)/g, `:${port}$1`)
+            .replace(/@(?:\[[\da-fA-F:]+\]|[\d.]+|[a-zA-Z0-9.-]+):(?:\d+)/g, `@${host}:${port}`)
             .replace(/[?&]sni=[^&#]+/g, '');
         return isBase64 ? Buffer.from(raw).toString('base64') : raw;
     }
 
     if (raw.includes('proxies:')) {
-        raw = raw
+        const parts = raw.split('proxies:');
+        let proxiesPart = parts.slice(1).join('proxies:');
+        proxiesPart = proxiesPart
+            .replace(/(\bserver:\s*)[^\s,}]+/g, `$1${host}`)
             .replace(/(\bport:\s*)\d+/g, `$1${port}`)
-            .replace(/(\btls:\s*)true/gi, '$1false');
-        return raw;
+            .replace(/(\btls:\s*)true/gi, '$1false')
+            .replace(/(\bsni:\s*)[^\s,}]+/g, '$1""');
+        return parts[0] + 'proxies:' + proxiesPart;
     }
 
     if (raw.includes('"outbounds"')) {
         raw = raw
+            .replace(/("server":\s*)"[^"]+"/g, `$1"${host}"`)
             .replace(/("server_port":\s*)\d+/g, `$1${port}`)
             .replace(/("tls":\s*\{[^}]*"enabled":\s*)true/gi, '$1false');
         return raw;
@@ -274,8 +279,13 @@ const worker = (await import('./_worker.js')).default;
 const server = http.createServer(async (req, res) => {
     try {
         const clientHost = req.headers['host'] || '127.0.0.1';
-        // Note: force https so _worker.js doesn't trigger 301 http->https redirection
-        const url = new URL(req.url, `https://${clientHost}`);
+        const hostOnly = clientHost.split(':')[0];
+        const isTls = Boolean(req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https');
+        const shouldApplyNoTls = process.env.NO_TLS === 'true' || (!isTls && process.env.NO_TLS !== 'false');
+        env.NO_TLS = shouldApplyNoTls;
+
+        const protocol = shouldApplyNoTls ? 'http:' : 'https:';
+        const url = new URL(req.url, `${protocol}//${clientHost}`);
 
         const headers = new Headers();
         for (const [k, v] of Object.entries(req.headers)) {
@@ -328,9 +338,6 @@ const server = http.createServer(async (req, res) => {
 
         const cfResponse = await worker.fetch(cfRequest, env, ctx);
 
-        const isTls = Boolean(req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https');
-        const shouldApplyNoTls = process.env.NO_TLS === 'true' || (!isTls && process.env.NO_TLS !== 'false');
-
         res.statusCode = cfResponse.status;
 
         // Strip headers that must not be blindly forwarded from upstream fetch:
@@ -378,7 +385,7 @@ const server = http.createServer(async (req, res) => {
         if (cfResponse.body) {
             if (shouldApplyNoTls && url.pathname.startsWith('/sub')) {
                 const rawText = await cfResponse.text();
-                const transformed = transformSubToNoTls(rawText, PORT);
+                const transformed = transformSubToNoTls(rawText, hostOnly, PORT);
                 res.setHeader('content-length', Buffer.byteLength(transformed));
                 res.end(transformed);
                 return;
@@ -404,7 +411,12 @@ const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, async (wsClient) => {
         const clientHost = req.headers['host'] || '127.0.0.1';
-        const url = new URL(req.url, `https://${clientHost}`);
+        const isTls = Boolean(req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https');
+        const shouldApplyNoTls = process.env.NO_TLS === 'true' || (!isTls && process.env.NO_TLS !== 'false');
+        env.NO_TLS = shouldApplyNoTls;
+
+        const protocol = shouldApplyNoTls ? 'http:' : 'https:';
+        const url = new URL(req.url, `${protocol}//${clientHost}`);
 
         const headers = new Headers();
         for (const [k, v] of Object.entries(req.headers)) {
