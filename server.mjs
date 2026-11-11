@@ -391,6 +391,19 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
+            if (shouldApplyNoTls && (url.pathname === '/admin' || url.pathname.startsWith('/admin/'))) {
+                const contentType = cfResponse.headers.get('content-type') || '';
+                if (contentType.includes('text/html')) {
+                    const rawHtml = await cfResponse.text();
+                    const fixedHtml = rawHtml
+                        .replace(/`https:\/\/\$\{host\}\/sub\?/g, '`http://${host}/sub?')
+                        .replace(/:443\?security=tls/g, `:${PORT}?security=none`);
+                    res.setHeader('content-length', Buffer.byteLength(Buffer.from(fixedHtml)));
+                    res.end(fixedHtml);
+                    return;
+                }
+            }
+
             const reader = cfResponse.body.getReader();
             while (true) {
                 const { done, value } = await reader.read();
