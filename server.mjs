@@ -212,7 +212,47 @@ function createDiskKV(dataDir) {
 }
 
 // ==========================================
-// 6. Main Server Entrypoint
+// 6. No-TLS & Plain IP Subscription Transformer
+// ==========================================
+function transformSubToNoTls(text, port) {
+    const trimmed = text.trim();
+    const isBase64 = /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed) && !trimmed.includes('vless://') && !trimmed.includes('proxies:');
+    let raw = trimmed;
+    if (isBase64) {
+        try {
+            raw = Buffer.from(trimmed, 'base64').toString('utf-8');
+        } catch {
+            raw = trimmed;
+        }
+    }
+
+    if (raw.includes('vless://') || raw.includes('trojan://') || raw.includes('ss://')) {
+        raw = raw
+            .replace(/security=tls/g, 'security=none')
+            .replace(/:(?:443|2053|2083|2087|2096|8443)(\?|#)/g, `:${port}$1`)
+            .replace(/[?&]sni=[^&#]+/g, '');
+        return isBase64 ? Buffer.from(raw).toString('base64') : raw;
+    }
+
+    if (raw.includes('proxies:')) {
+        raw = raw
+            .replace(/(\bport:\s*)\d+/g, `$1${port}`)
+            .replace(/(\btls:\s*)true/gi, '$1false');
+        return raw;
+    }
+
+    if (raw.includes('"outbounds"')) {
+        raw = raw
+            .replace(/("server_port":\s*)\d+/g, `$1${port}`)
+            .replace(/("tls":\s*\{[^}]*"enabled":\s*)true/gi, '$1false');
+        return raw;
+    }
+
+    return text;
+}
+
+// ==========================================
+// 7. Main Server Entrypoint
 // ==========================================
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.BIND_HOST || '0.0.0.0';
@@ -288,12 +328,28 @@ const server = http.createServer(async (req, res) => {
 
         const cfResponse = await worker.fetch(cfRequest, env, ctx);
 
+        const isTls = Boolean(req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https');
+        const shouldApplyNoTls = process.env.NO_TLS === 'true' || (!isTls && process.env.NO_TLS !== 'false');
+
         res.statusCode = cfResponse.status;
         for (const [k, v] of cfResponse.headers.entries()) {
-            res.setHeader(k, v);
+            if (k.toLowerCase() === 'set-cookie' && shouldApplyNoTls) {
+                // If connecting over plain HTTP, remove 'Secure;' flag so the browser allows storing the auth cookie for IP address
+                res.setHeader(k, v.replace(/;\s*Secure/gi, ''));
+            } else {
+                res.setHeader(k, v);
+            }
         }
 
         if (cfResponse.body) {
+            if (shouldApplyNoTls && url.pathname.startsWith('/sub')) {
+                const rawText = await cfResponse.text();
+                const transformed = transformSubToNoTls(rawText, PORT);
+                res.setHeader('content-length', Buffer.byteLength(transformed));
+                res.end(transformed);
+                return;
+            }
+
             const reader = cfResponse.body.getReader();
             while (true) {
                 const { done, value } = await reader.read();
