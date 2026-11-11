@@ -332,13 +332,47 @@ const server = http.createServer(async (req, res) => {
         const shouldApplyNoTls = process.env.NO_TLS === 'true' || (!isTls && process.env.NO_TLS !== 'false');
 
         res.statusCode = cfResponse.status;
+
+        // Strip headers that must not be blindly forwarded from upstream fetch:
+        // 1. content-encoding: Node.js global fetch automatically decompresses upstream bodies,
+        //    leaving cfResponse.body uncompressed. Forwarding 'content-encoding: gzip' causes
+        //    browsers to fail with net::ERR_CONTENT_DECODING_FAILED (blank screen).
+        // 2. content-length: The original content-length is the compressed size (or may change),
+        //    which causes truncation. Letting Node.js use chunked transfer encoding is safe.
+        // 3. hop-by-hop headers: connection, keep-alive, transfer-encoding.
+        // 4. strict-transport-security: must not be sent over plain HTTP/IP.
+        const STRIP_HEADERS = new Set([
+            'content-encoding',
+            'content-length',
+            'transfer-encoding',
+            'connection',
+            'keep-alive'
+        ]);
+        if (shouldApplyNoTls) {
+            STRIP_HEADERS.add('strict-transport-security');
+        }
+
+        const setCookies = typeof cfResponse.headers.getSetCookie === 'function'
+            ? cfResponse.headers.getSetCookie()
+            : null;
+
+        if (setCookies && setCookies.length > 0) {
+            const processed = shouldApplyNoTls
+                ? setCookies.map(c => c.replace(/;\s*Secure/gi, ''))
+                : setCookies;
+            res.setHeader('set-cookie', processed);
+        }
+
         for (const [k, v] of cfResponse.headers.entries()) {
-            if (k.toLowerCase() === 'set-cookie' && shouldApplyNoTls) {
-                // If connecting over plain HTTP, remove 'Secure;' flag so the browser allows storing the auth cookie for IP address
-                res.setHeader(k, v.replace(/;\s*Secure/gi, ''));
-            } else {
-                res.setHeader(k, v);
+            const lower = k.toLowerCase();
+            if (STRIP_HEADERS.has(lower)) continue;
+            if (lower === 'set-cookie') {
+                if (!setCookies || setCookies.length === 0) {
+                    res.setHeader(k, shouldApplyNoTls ? v.replace(/;\s*Secure/gi, '') : v);
+                }
+                continue;
             }
+            res.setHeader(k, v);
         }
 
         if (cfResponse.body) {
